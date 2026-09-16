@@ -1,0 +1,314 @@
+{
+  "schema": 1,
+  "status": "running",
+  "run_id": "f5b5b571-9fd9-4395-8226-927956bf9b2e",
+  "sequence": 264,
+  "generated_at_ms": 1789515456259,
+  "condition": "intact",
+  "decoder": "bci",
+  "frame": "data:image/jpeg;base64,/9j/4AAQSkZJRgA...",
+  "input_frame_sha256": "fd8ea17c322473a13e79ff045eb39e13e325248462099ccb81bbbda1eea716c8",
+  "display_jpeg_sha256": "652a941629657d39b1436f984d1db568f9b1df72d81182f4f3fbb1617a5c2f5f",
+  "provenance": {
+    "...": "graph, kernel and game asset hashes"
+  },
+  "manifest": {
+    "dataset": "malecns_v1",
+    "neurons": 166700,
+    "edges": 25582938,
+    "readouts": [
+      {
+        "index": 48,
+        "id": "10059",
+        "type": "DNp20",
+        "side": "R"
+      },
+      {
+        "index": 146,
+        "id": "10162",
+        "type": "DNp20",
+        "side": "L"
+      },
+      {
+        "index": 489,
+        "id": "10527",
+        "type": "DNpe017",
+        "side": "L"
+      },
+      {
+        "index": 142493,
+        "id": "555871",
+        "type": "DNpe017",
+        "side": "R"
+      }
+    ]
+  },
+  "clocks": {
+    "wall_seconds": 60.637,
+    "neural_seconds": 21.4857,
+    "game_seconds": 21.4857,
+    "speed": 0.354,
+    "brain_step_ms": 55.818
+  },
+  "game": {
+    "episode": 1,
+    "tick": 752,
+    "finished": false,
+    "health": 76,
+    "kills": 2,
+    "ammo": 48,
+    "score": 0.0,
+    "enemies": 8,
+    "enemies_spawned": 10,
+    "ammo_pickups": 0,
+    "ammo_spawned": 4,
+    "imps": 4,
+    "zombies": 4
+  },
+  "episodes": [],
+  "action": {
+    "turn": -0.2742930156996461,
+    "forward": 17.769179511714807,
+    "attack": true
+  },
+  "readouts": [
+    {
+      "index": 48,
+      "id": "10059",
+      "type": "DNp20",
+      "side": "R",
+      "spikes": 1,
+      "rate_hz": 29.447
+    },
+    {
+      "index": 146,
+      "id": "10162",
+      "type": "DNp20",
+      "side": "L",
+      "spikes": 1,
+      "rate_hz": 31.733
+    },
+    {
+      "index": 489,
+      "id": "10527",
+      "type": "DNpe017",
+      "side": "L",
+      "spikes": 1,
+      "rate_hz": 32.447
+    },
+    {
+      "index": 142493,
+      "id": "555871",
+      "type": "DNpe017",
+      "side": "R",
+      "spikes": 0,
+      "rate_hz": 11.976
+    }
+  ],
+  "total_spikes": 11465879,
+  "window_spikes": 30218,
+  "window_ms": 57.1,
+  "total_action_ticks": 752,
+  "neuron_voltage_mv": {
+    "10059": -52.0,
+    "10162": -51.964,
+    "10527": -52.0,
+    "555871": -47.804
+  },
+  "populations": [
+    {
+      "name": "ENS",
+      "neurons": 50,
+      "spikes": 0,
+      "mean_rate_hz": 0.0
+    },
+    {
+      "name": "ascending_neuron",
+      "neurons": 1846,
+      "spikes": 0,
+      "mean_rate_hz": 0.0
+    }
+  ],
+  "retina": {
+    "uv": [
+      [
+        0.5785999894142151,
+        0.33329999446868896
+      ],
+      [
+        0.385699987411499,
+        0.21209999918937683
+      ],
+      [
+        0.705299973487854,
+        0.02630000002682209
+      ]
+    ],
+    "luminance": [
+      0.03830000013113022,
+      0.08940000087022781,
+      0.0005000000237487257
+    ],
+    "neuron_ids": [
+      "11139",
+      "19418",
+      "28122"
+    ],
+    "side": [
+      "L",
+      "L",
+      "R"
+    ],
+    "filtered_luminance": [
+      0.04179999977350235,
+      0.0885000005364418,
+      0.0006000000284984708
+    ],
+    "drive_mv": [
+      20.29319953918457,
+      24.470699310302734,
+      0.8041999936103821
+    ],
+    "spikes_last_step": [
+      3,
+      3,
+      0
+    ],
+    "measurement": "Raw normalized frame luminance; not firing rate or a reconstructed subjective view.",
+    "full_sample_count": 3335,
+    "display_stride": 8
+  },
+  "raster": {
+    "neuron_ids": [
+      "10009",
+      "24062",
+      "31565",
+      "37577"
+    ],
+    "bins": [
+      {
+        "neural_ms": 21485.7,
+        "window_ms": 57.1,
+        "counts": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "population_spikes": 30218
+      }
+    ]
+  },
+  "timeline": [
+    {
+      "tick": 752,
+      "spikes": 15233,
+      "action": {
+        "turn": -0.2742930156996461,
+        "forward": 17.769179511714807,
+        "attack": true
+      }
+    }
+  ],
+  "audit": {
+    "run_id": "f5b5b571-9fd9-4395-8226-927956bf9b2e",
+    "tick": 752,
+    "neural_ms": 21485.7,
+    "episode": 1,
+    "requested": {
+      "turn": -0.2742930156996461,
+      "forward": 17.769179511714807,
+      "attack": true
+    },
+    "applied": {
+      "turn": -0.2742930156996461,
+      "forward": 17.769179511714807,
+      "attack": true
+    },
+    "reward": 0.0
+  },
+  "reward": {
+    "mode": "off",
+    "sugar_pulses": 0,
+    "active": false,
+    "plasticity": false
+  },
+  "protocol": {
+    "scenario": "combat_survival",
+    "phase": "baseline",
+    "broadcast_capture_fps_limit": 8,
+    "frame_timing": "JPEG of pre-action input frame; game counters are post-action; raw RGB hash differs from compressed JPEG hash",
+    "episode_end": "death"
+  },
+  "spectator": {
+    "version": 1,
+    "timing": "pre-action",
+    "episode": 1,
+    "tick": 751,
+    "player": {
+      "x": -334.19728088378906,
+      "y": 154.0548095703125,
+      "z": 0.0,
+      "angle": 61.59484864715367,
+      "pitch": 0.0
+    },
+    "objects": [
+      {
+        "id": 96,
+        "name": "DoomImpBall",
+        "x": -78.5323486328125,
+        "y": -128.6601104736328,
+        "z": 32.0,
+        "angle": 137.17694649872763
+      },
+      {
+        "id": 20,
+        "name": "DoomFlyImp",
+        "x": -29.1861572265625,
+        "y": -173.9901123046875,
+        "z": 0.0,
+        "angle": 135.00000003143214
+      },
+      {
+        "id": 0,
+        "name": "DoomFlyImp",
+        "x": -137.14205932617188,
+        "y": -146.20101928710938,
+        "z": 0.0,
+        "angle": 45.00000001047738
+      }
+    ],
+    "sectors": [
+      {
+        "floor": 0.0,
+        "ceiling": 192.0,
+        "lines": [
+          [
+            -384.0,
+            -384.0,
+            -384.0,
+            384.0
+          ],
+          [
+            -384.0,
+            384.0,
+            384.0,
+            384.0
+          ],
+          [
+            384.0,
+            384.0,
+            384.0,
+            -384.0
+          ],
+          [
+            384.0,
+            -384.0,
+            -384.0,
+            -384.0
+          ]
+        ]
+      }
+    ]
+  }
+}

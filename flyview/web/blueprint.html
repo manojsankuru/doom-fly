@@ -1,0 +1,589 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DOOMFLY blueprint</title>
+<style>
+  :root {
+    --bg: #071a31;
+    --panel: rgba(5, 18, 36, 0.86);
+    --line: #1d3a5f;
+    --text: #e6f1ff;
+    --dim: #86a3c3;
+    --accent: #7dd3fc;
+    --good: #4ade80;
+    --warn: #facc15;
+    --bad: #f87171;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--text);
+    font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  canvas { display: block; cursor: grab; }
+  canvas.dragging { cursor: grabbing; }
+  .panel { position: fixed; background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px 14px; backdrop-filter: blur(6px); }
+  #hud { top: 14px; left: 14px; width: 262px; }
+  #title { font-size: 16px; font-weight: 800; letter-spacing: .16em; }
+  #title span { color: var(--bad); }
+  #subtitle { color: var(--dim); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; margin: 2px 0 10px; }
+  .row { display: flex; justify-content: space-between; gap: 10px; margin-top: 3px; }
+  .row .k { color: var(--dim); }
+  .row .v { font-variant-numeric: tabular-nums; font-weight: 700; }
+  #status { margin-top: 9px; display: flex; align-items: center; gap: 6px; color: var(--dim); }
+  #dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); flex: none; }
+  #mode { margin-top: 4px; color: var(--warn); font-size: 11px; min-height: 1em; }
+  #filter { margin-top: 10px; }
+  #filter input { width: 100%; accent-color: var(--accent); }
+  #legend { bottom: 14px; left: 14px; width: 262px; }
+  #legend h3 { margin: 0 0 6px; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--dim); font-weight: 600; }
+  .key { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+  .swatch { width: 12px; height: 12px; border-radius: 50%; flex: none; }
+  .swatch.dashed { background: transparent !important; border: 2px dashed #a78bfa; }
+  .swatch.ring { background: transparent !important; border: 2px solid #e2e8f0; }
+  #tip { position: fixed; pointer-events: none; display: none; max-width: 280px; padding: 8px 10px; z-index: 5; }
+  #tip b { color: var(--accent); }
+  #loader { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(4, 12, 24, .92); z-index: 10; }
+  #loader .card { max-width: 520px; padding: 22px 26px; border: 2px dashed var(--line); border-radius: 12px; background: var(--panel); }
+  #loader.over .card { border-color: var(--accent); }
+  #loader code { color: var(--accent); }
+  #loaderError { color: var(--bad); margin-top: 8px; }
+</style>
+</head>
+<body>
+<canvas id="view"></canvas>
+<div id="hud" class="panel">
+  <div id="title">DOOM<span>FLY</span> BLUEPRINT</div>
+  <div id="subtitle">500 neurons of the male fly connectome</div>
+  <div class="row"><span class="k">Neurons</span><span class="v" id="nodeCount">–</span></div>
+  <div class="row"><span class="k">Connections shown</span><span class="v" id="edgeCount">–</span></div>
+  <div class="row"><span class="k">Cells streaming</span><span class="v" id="observed">–</span></div>
+  <div class="row"><span class="k">Firing now</span><span class="v" id="firing">–</span></div>
+  <div class="row"><span class="k">Brightening now</span><span class="v" id="brightening">–</span></div>
+  <div id="filter">
+    <div class="row"><span class="k">Min synapses per edge</span><span class="v" id="minLabel">–</span></div>
+    <input id="minContacts" type="range" min="1" max="50" step="1" value="1">
+  </div>
+  <div id="status"><span id="dot"></span><span id="statusText">loading graph</span></div>
+  <div id="mode"></div>
+</div>
+<div id="legend" class="panel">
+  <h3>Controller neurons</h3>
+  <div id="controllerKeys"></div>
+  <h3 style="margin-top:10px">Other cells</h3>
+  <div class="key"><span class="swatch ring"></span>other readout (live)</div>
+  <div class="key"><span class="swatch" style="background:#7dd3fc"></span>raster sample (live)</div>
+  <div class="key"><span class="swatch" style="background:#35557c"></span>no live data from the simulator</div>
+  <div class="key"><span class="swatch dashed"></span>not streaming on this model</div>
+  <div class="key" style="margin-top:6px;color:var(--dim)">A cell glows when its rate rises above its own recent average. Edges: blue excitatory, red inhibitory.</div>
+</div>
+<div id="tip" class="panel"></div>
+<div id="loader">
+  <div class="card">
+    <h2 style="margin:0 0 8px;font-size:16px">Load the neuron graph</h2>
+    <p>The browser blocked reading <code>blueprint-graph.json</code> next to this page. That happens when the page is opened as a file.</p>
+    <p>Either serve the folder, <code>python -m http.server 8780</code> in <code>flyview/web</code>, then open <code>http://127.0.0.1:8780/blueprint.html</code>. Or pick or drop the file here:</p>
+    <p><input type="file" id="graphFile" accept=".json,application/json"></p>
+    <div id="loaderError"></div>
+  </div>
+</div>
+<script type="module">
+import { forceSimulation, forceLink, forceManyBody, forceCollide, forceX, forceY } from 'https://cdn.jsdelivr.net/npm/d3-force@3/+esm';
+
+const params = new URLSearchParams(location.search);
+const WS_URL = params.get('ws') || 'ws://localhost:8767';
+const GRAPH_URL = params.get('graph') || 'blueprint-graph.json';
+const MAX_VISIBLE_EDGES = 2500;
+const FAST_TAU_S = 0.4;
+const SLOW_TAU_S = 6;
+const CONTROLLER_COLORS = {
+  DNp20_L: '#f472b6',
+  DNp20_R: '#fb923c',
+  DNpe017: '#facc15',
+  PPL101_11327: '#a78bfa',
+  PPL101_11900: '#34d399',
+};
+const CONTROLLER_LABELS = {
+  DNp20_L: 'DNp20 left · turn',
+  DNp20_R: 'DNp20 right · turn',
+  DNpe017: 'DNpe017 · move and fire',
+  PPL101_11327: 'PPL101 11327 · dopamine',
+  PPL101_11900: 'PPL101 11900 · dopamine',
+};
+const $ = (id) => document.getElementById(id);
+
+const canvas = $('view');
+const ctx = canvas.getContext('2d');
+const view = { x: 0, y: 0, k: 1 };
+const state = {
+  graphLoaded: false,
+  nodes: [],
+  links: [],
+  messages: 0,
+  activityMode: null,
+  lastMessage: null,
+  socketOpen: false,
+  lastArrival: 0,
+  firing: 0,
+  brightening: 0,
+  visibleEdges: 0,
+  minContacts: 1,
+  hover: null,
+  view,
+};
+window.blueprint = state;
+let simulation = null;
+
+$('controllerKeys').innerHTML = Object.entries(CONTROLLER_COLORS)
+  .map(([key, color]) => `<div class="key"><span class="swatch" style="background:${color}"></span>${CONTROLLER_LABELS[key]}</div>`)
+  .join('');
+
+function resize() {
+  const ratio = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = Math.round(window.innerWidth * ratio);
+  canvas.height = Math.round(window.innerHeight * ratio);
+  canvas.style.width = `${window.innerWidth}px`;
+  canvas.style.height = `${window.innerHeight}px`;
+  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+}
+window.addEventListener('resize', resize);
+resize();
+
+function baseRadius(node) {
+  if (node.controller) return 9;
+  if (node.group === 'readout') return 6;
+  if (node.group === 'raster') return 4.5;
+  return 2.6 + Math.min(Math.sqrt(node.degree) * 0.35, 3);
+}
+
+function buildGraph(graph) {
+  const nodes = graph.nodes.map((node, index) => ({
+    ...node,
+    index,
+    degree: 0,
+    fast: 0,
+    slow: 0,
+    rate: 0,
+    glow: 0,
+    shownGlow: 0,
+    streaming: node.live !== 'none' && node.live !== 'v6',
+    seen: false,
+  }));
+  const links = graph.edges.map(([source, target, contacts, sign]) => {
+    nodes[source].degree += 1;
+    nodes[target].degree += 1;
+    return { source, target, contacts, sign };
+  });
+  for (const node of nodes) node.radius = baseRadius(node);
+  const sorted = links.map((link) => link.contacts).sort((a, b) => b - a);
+  const threshold = sorted.length > MAX_VISIBLE_EDGES ? sorted[MAX_VISIBLE_EDGES - 1] : 1;
+  const maxContacts = sorted[0] || 1;
+  $('minContacts').max = String(Math.min(maxContacts, 60));
+  $('minContacts').value = String(Math.max(threshold, 1));
+  state.minContacts = Math.max(threshold, 1);
+  state.nodes = nodes;
+  state.links = links;
+  state.graphLoaded = true;
+  state.meta = { selection: graph.selection, stats: graph.stats, dataset: graph.dataset };
+  $('nodeCount').textContent = String(nodes.length);
+  const observable = nodes.filter((node) => node.live !== 'none').length;
+  $('observed').textContent = `${observable} of ${nodes.length}`;
+
+  simulation = forceSimulation(nodes)
+    .force('link', forceLink(links).id((node) => node.index).distance((link) => 26 + 40 / Math.sqrt(link.contacts)).strength((link) => Math.min(0.9, 0.08 + Math.log10(1 + link.contacts) * 0.25) / Math.sqrt(Math.min(link.source.degree, link.target.degree) || 1)))
+    .force('charge', forceManyBody().strength((node) => (node.controller ? -260 : -38)).distanceMax(520))
+    .force('collide', forceCollide((node) => node.radius + 2))
+    .force('x', forceX(0).strength(0.045))
+    .force('y', forceY(0).strength(0.045))
+    .stop();
+  for (let i = 0; i < 320; i++) simulation.tick();
+  simulation.alpha(0.05).alphaDecay(0.03).restart();
+  fitView();
+  updateEdgeCount();
+  setStatus(`graph loaded, connecting to ${WS_URL}`, 'var(--dim)');
+  connect();
+}
+
+function fitView() {
+  const xs = state.nodes.map((node) => node.x);
+  const ys = state.nodes.map((node) => node.y);
+  const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+  const width = window.innerWidth - 300;
+  const height = window.innerHeight - 40;
+  view.k = Math.min(width / Math.max(maxX - minX, 1), height / Math.max(maxY - minY, 1)) * 0.92;
+  view.x = 290 + width / 2 - ((minX + maxX) / 2) * view.k;
+  view.y = 20 + height / 2 - ((minY + maxY) / 2) * view.k;
+}
+
+function updateEdgeCount() {
+  state.visibleEdges = state.links.filter((link) => link.contacts >= state.minContacts).length;
+  $('edgeCount').textContent = `${state.visibleEdges} of ${state.links.length}`;
+  $('minLabel').textContent = String(state.minContacts);
+}
+
+function setStatus(text, color) {
+  $('statusText').textContent = text;
+  $('dot').style.background = color;
+}
+
+function smoothing(dtSeconds, tau) {
+  return 1 - Math.exp(-dtSeconds / tau);
+}
+
+function nodeRate(node, message) {
+  if (node.live === 'v6') {
+    const reading = message.neurons ? message.neurons[node.controller] : null;
+    return reading ? reading.rate_hz : null;
+  }
+  if (message.activity) {
+    if (!node.streaming) return null;
+    return message.activity.rates[node.id] || 0;
+  }
+  if (node.controller && message.neurons) {
+    const reading = message.neurons[node.controller];
+    return reading ? reading.rate_hz : null;
+  }
+  return null;
+}
+
+function accept(message) {
+  const now = performance.now();
+  const dt = state.lastArrival ? Math.min((now - state.lastArrival) / 1000, 2) : 0.15;
+  state.lastArrival = now;
+  state.messages += 1;
+  state.lastMessage = message;
+  if (message.status !== 'running') {
+    setStatus('simulator offline', 'var(--bad)');
+    return;
+  }
+  const hasActivity = Boolean(message.activity);
+  if (state.activityMode !== hasActivity) {
+    state.activityMode = hasActivity;
+    $('mode').textContent = hasActivity ? '' : 'Bridge runs without --activity: only the controller neurons can glow.';
+  }
+  const fast = smoothing(dt, FAST_TAU_S);
+  const slow = smoothing(dt, SLOW_TAU_S);
+  let firing = 0;
+  let brightening = 0;
+  for (const node of state.nodes) {
+    const rate = nodeRate(node, message);
+    if (rate === null) {
+      node.seen = false;
+      node.glow = 0;
+      continue;
+    }
+    if (!node.seen) {
+      node.fast = rate;
+      node.slow = rate;
+      node.seen = true;
+    }
+    node.rate = rate;
+    node.fast += (rate - node.fast) * fast;
+    node.slow += (rate - node.slow) * slow;
+    const rise = node.fast - node.slow;
+    node.glow = Math.max(0, Math.min(1, rise / Math.max(3, node.slow * 0.35)));
+    if (rate > 0) firing += 1;
+    if (node.glow > 0.2) brightening += 1;
+  }
+  state.firing = firing;
+  state.brightening = brightening;
+  state.streaming = state.nodes.filter((node) => node.seen).length;
+  $('observed').textContent = `${state.streaming} of ${state.nodes.length}`;
+  $('firing').textContent = String(firing);
+  $('brightening').textContent = String(brightening);
+}
+
+let retryDelay = 500;
+function connect() {
+  let socket;
+  try {
+    socket = new WebSocket(WS_URL);
+  } catch (error) {
+    setStatus(`bad websocket url ${WS_URL}`, 'var(--bad)');
+    return;
+  }
+  socket.onopen = () => {
+    state.socketOpen = true;
+    retryDelay = 500;
+    setStatus('bridge connected, waiting', 'var(--warn)');
+  };
+  socket.onmessage = (event) => {
+    try {
+      accept(JSON.parse(event.data));
+    } catch (error) {
+      setStatus('bad message from bridge', 'var(--bad)');
+    }
+  };
+  socket.onclose = () => {
+    state.socketOpen = false;
+    setStatus(`bridge offline, retrying in ${(retryDelay / 1000).toFixed(1)} s`, 'var(--bad)');
+    setTimeout(connect, retryDelay);
+    retryDelay = Math.min(retryDelay * 2, 5000);
+  };
+}
+
+function nodeColor(node) {
+  if (node.controller) return CONTROLLER_COLORS[node.controller];
+  if (node.group === 'readout') return '#e2e8f0';
+  if (node.group === 'raster') return '#7dd3fc';
+  return '#35557c';
+}
+
+function mix(hex, amount) {
+  const value = parseInt(hex.slice(1), 16);
+  const r = (value >> 16) & 255, g = (value >> 8) & 255, b = value & 255;
+  const lift = (channel) => Math.round(channel + (255 - channel) * amount);
+  return `rgb(${lift(r)},${lift(g)},${lift(b)})`;
+}
+
+function drawGrid(width, height) {
+  ctx.fillStyle = '#071a31';
+  ctx.fillRect(0, 0, width, height);
+  const step = 40 * view.k;
+  if (step < 8) return;
+  ctx.strokeStyle = 'rgba(125, 180, 240, 0.06)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let x = ((view.x % step) + step) % step; x < width; x += step) { ctx.moveTo(x, 0); ctx.lineTo(x, height); }
+  for (let y = ((view.y % step) + step) % step; y < height; y += step) { ctx.moveTo(0, y); ctx.lineTo(width, y); }
+  ctx.stroke();
+}
+
+function drawEdges() {
+  const hover = state.hover;
+  const buckets = new Map();
+  for (const link of state.links) {
+    const touchesHover = hover && (link.source === hover || link.target === hover);
+    if (link.contacts < state.minContacts && !touchesHover) continue;
+    const width = link.contacts >= 20 ? 2 : link.contacts >= 6 ? 1 : 0;
+    const key = `${link.sign}|${width}|${touchesHover ? 1 : 0}`;
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key).push(link);
+  }
+  for (const [key, links] of buckets) {
+    const [sign, width, lit] = key.split('|').map(Number);
+    const alpha = lit ? 0.85 : hover ? 0.05 : [0.1, 0.2, 0.34][width];
+    ctx.strokeStyle = sign > 0 ? `rgba(125, 211, 252, ${alpha})` : `rgba(248, 113, 113, ${alpha})`;
+    ctx.lineWidth = (0.6 + width * 0.7) * (lit ? 1.6 : 1);
+    ctx.beginPath();
+    for (const link of links) {
+      ctx.moveTo(link.source.x * view.k + view.x, link.source.y * view.k + view.y);
+      ctx.lineTo(link.target.x * view.k + view.x, link.target.y * view.k + view.y);
+    }
+    ctx.stroke();
+  }
+}
+
+function drawNodes() {
+  const scale = Math.max(0.6, Math.min(view.k, 2.2));
+  const ordered = [...state.nodes].sort((a, b) => (a.controller ? 1 : 0) - (b.controller ? 1 : 0) || a.shownGlow - b.shownGlow);
+  for (const node of ordered) {
+    node.shownGlow += (node.glow - node.shownGlow) * 0.12;
+    const x = node.x * view.k + view.x;
+    const y = node.y * view.k + view.y;
+    const radius = node.radius * scale;
+    const color = nodeColor(node);
+    if (node.shownGlow > 0.02) {
+      const halo = radius * (2.2 + node.shownGlow * 3.2);
+      const gradient = ctx.createRadialGradient(x, y, radius * 0.5, x, y, halo);
+      gradient.addColorStop(0, `rgba(255, 255, 255, ${0.55 * node.shownGlow})`);
+      gradient.addColorStop(0.35, hexAlpha(color, 0.45 * node.shownGlow));
+      gradient.addColorStop(1, hexAlpha(color, 0));
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      ctx.arc(x, y, halo, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    if (node.live === 'v6' && !node.seen) {
+      ctx.fillStyle = 'rgba(7, 26, 49, 0.9)';
+      ctx.fill();
+      ctx.setLineDash([3, 3]);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.setLineDash([]);
+    } else if (node.group === 'readout') {
+      ctx.fillStyle = mix('#0b2847', node.shownGlow);
+      ctx.fill();
+      ctx.strokeStyle = mix(color, node.shownGlow);
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    } else {
+      ctx.fillStyle = mix(color, node.shownGlow * 0.85);
+      ctx.fill();
+      if (node.controller) {
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
+    }
+    if (node.controller || node === state.hover) {
+      ctx.font = `${node.controller ? 600 : 500} 11px ui-monospace, Consolas, monospace`;
+      ctx.fillStyle = node.controller ? color : '#e6f1ff';
+      ctx.fillText(node.controller ? `${node.type} ${node.side}` : `${node.type || node.id}`, x + radius + 5, y + 4);
+    }
+  }
+}
+
+function hexAlpha(hex, alpha) {
+  const value = parseInt(hex.slice(1), 16);
+  return `rgba(${(value >> 16) & 255}, ${(value >> 8) & 255}, ${value & 255}, ${alpha})`;
+}
+
+function frame() {
+  const width = window.innerWidth;
+  const height = window.innerHeight;
+  drawGrid(width, height);
+  if (state.graphLoaded) {
+    drawEdges();
+    drawNodes();
+    if (state.socketOpen && state.lastMessage && state.lastMessage.status === 'running') {
+      const silent = performance.now() - state.lastArrival;
+      if (silent > 2000) setStatus(`no data for ${(silent / 1000).toFixed(0)} s`, 'var(--warn)');
+      else setStatus(state.activityMode ? 'live, with activity' : 'live, controllers only', 'var(--good)');
+    }
+  }
+  requestAnimationFrame(frame);
+}
+
+function nodeAt(clientX, clientY) {
+  let best = null;
+  let bestDistance = Infinity;
+  const scale = Math.max(0.6, Math.min(view.k, 2.2));
+  for (const node of state.nodes) {
+    const dx = node.x * view.k + view.x - clientX;
+    const dy = node.y * view.k + view.y - clientY;
+    const distance = Math.hypot(dx, dy);
+    if (distance < Math.max(node.radius * scale + 4, 8) && distance < bestDistance) {
+      best = node;
+      bestDistance = distance;
+    }
+  }
+  return best;
+}
+
+function describe(node) {
+  const live = {
+    readout: 'live: decoder readout',
+    raster: 'live: raster display sample',
+    v6: node.seen ? 'live: experimental-v6 model' : 'not streaming on this model',
+    none: 'no live data from the simulator',
+  }[node.live];
+  const summed = node.controller === 'DNpe017' && state.activityMode === false ? ' (left and right summed)' : '';
+  const rate = node.seen ? `<br>rate ${node.rate.toFixed(1)} Hz${summed} · average ${node.slow.toFixed(1)} Hz` : '';
+  const role = node.controller ? `<br>${CONTROLLER_LABELS[node.controller]}` : '';
+  return `<b>${node.type || 'untyped'}</b> ${node.side || ''} · body ${node.id}${role}<br>${node.superclass} · ${node.nt || 'unknown transmitter'}<br>${node.degree} connections shown in this graph<br>${live}${rate}`;
+}
+
+let drag = null;
+canvas.addEventListener('pointerdown', (event) => {
+  const node = nodeAt(event.clientX, event.clientY);
+  drag = node
+    ? { node, pointer: event.pointerId }
+    : { pan: true, pointer: event.pointerId, startX: event.clientX, startY: event.clientY, viewX: view.x, viewY: view.y };
+  if (node) {
+    node.fx = node.x;
+    node.fy = node.y;
+    simulation.alphaTarget(0.12).restart();
+  }
+  canvas.setPointerCapture(event.pointerId);
+  canvas.classList.add('dragging');
+});
+canvas.addEventListener('pointermove', (event) => {
+  if (drag && drag.node) {
+    drag.node.fx = (event.clientX - view.x) / view.k;
+    drag.node.fy = (event.clientY - view.y) / view.k;
+  } else if (drag && drag.pan) {
+    view.x = drag.viewX + event.clientX - drag.startX;
+    view.y = drag.viewY + event.clientY - drag.startY;
+  }
+  const hover = drag && drag.node ? drag.node : nodeAt(event.clientX, event.clientY);
+  state.hover = hover;
+  const tip = $('tip');
+  if (hover) {
+    tip.innerHTML = describe(hover);
+    tip.style.display = 'block';
+    tip.style.left = `${Math.min(event.clientX + 16, window.innerWidth - 300)}px`;
+    tip.style.top = `${Math.min(event.clientY + 16, window.innerHeight - 140)}px`;
+  } else {
+    tip.style.display = 'none';
+  }
+});
+function endDrag() {
+  if (drag && drag.node) {
+    drag.node.fx = null;
+    drag.node.fy = null;
+    simulation.alphaTarget(0);
+  }
+  drag = null;
+  canvas.classList.remove('dragging');
+}
+canvas.addEventListener('pointerup', endDrag);
+canvas.addEventListener('pointercancel', endDrag);
+canvas.addEventListener('pointerleave', () => {
+  if (!drag) {
+    state.hover = null;
+    $('tip').style.display = 'none';
+  }
+});
+canvas.addEventListener('wheel', (event) => {
+  event.preventDefault();
+  const factor = Math.exp(-event.deltaY * 0.0015);
+  const k = Math.max(0.15, Math.min(8, view.k * factor));
+  view.x = event.clientX - ((event.clientX - view.x) / view.k) * k;
+  view.y = event.clientY - ((event.clientY - view.y) / view.k) * k;
+  view.k = k;
+}, { passive: false });
+$('minContacts').addEventListener('input', (event) => {
+  state.minContacts = Number(event.target.value);
+  updateEdgeCount();
+});
+
+function showLoader(message) {
+  $('loader').style.display = 'flex';
+  $('loaderError').textContent = message || '';
+  setStatus('waiting for the graph file', 'var(--warn)');
+}
+
+function acceptGraphText(text) {
+  try {
+    const graph = JSON.parse(text);
+    if (!Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) throw new Error('not a blueprint graph: nodes and edges missing');
+    $('loader').style.display = 'none';
+    buildGraph(graph);
+  } catch (error) {
+    showLoader(error.message);
+  }
+}
+
+$('graphFile').addEventListener('change', async (event) => {
+  const file = event.target.files[0];
+  if (file) acceptGraphText(await file.text());
+});
+window.addEventListener('dragover', (event) => {
+  if (state.graphLoaded) return;
+  event.preventDefault();
+  $('loader').classList.add('over');
+});
+window.addEventListener('drop', async (event) => {
+  if (state.graphLoaded) return;
+  event.preventDefault();
+  $('loader').classList.remove('over');
+  const file = event.dataTransfer.files[0];
+  if (file) acceptGraphText(await file.text());
+});
+
+fetch(GRAPH_URL)
+  .then((response) => {
+    if (!response.ok) throw new Error(`${response.status} for ${GRAPH_URL}`);
+    return response.text();
+  })
+  .then(acceptGraphText)
+  .catch(() => showLoader(location.protocol === 'file:' ? '' : `could not load ${GRAPH_URL}`));
+
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

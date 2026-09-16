@@ -1,0 +1,540 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DOOMFLY arena</title>
+<style>
+  :root {
+    --bg: #07090c;
+    --panel: rgba(8, 11, 15, 0.82);
+    --line: #1f2a37;
+    --text: #e6edf3;
+    --dim: #7d8b99;
+    --accent: #7dd3fc;
+    --good: #4ade80;
+    --warn: #facc15;
+    --bad: #f87171;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--text);
+    font: 13px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  canvas { display: block; }
+  #hud {
+    position: fixed; top: 14px; left: 14px; min-width: 214px; padding: 12px 14px 12px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    backdrop-filter: blur(6px); pointer-events: none; user-select: none;
+  }
+  #title { font-size: 17px; font-weight: 800; letter-spacing: .18em; }
+  #title span { color: var(--bad); }
+  #subtitle { color: var(--dim); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; margin-bottom: 10px; }
+  .row { display: flex; justify-content: space-between; align-items: baseline; margin-top: 5px; }
+  .row .k { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+  .row .v { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  #healthbar { height: 6px; margin-top: 4px; background: #1a222c; border-radius: 3px; overflow: hidden; }
+  #healthfill { height: 100%; width: 0%; background: var(--good); transition: width .15s linear, background .3s; }
+  #status { margin-top: 10px; font-size: 11px; color: var(--dim); display: flex; align-items: center; gap: 6px; }
+  #dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); flex: none; }
+  #hint { position: fixed; left: 14px; bottom: 12px; color: var(--dim); font-size: 11px; pointer-events: none; }
+  #flash { position: fixed; inset: 0; pointer-events: none; opacity: 0;
+    background: radial-gradient(circle, transparent 35%, rgba(220, 38, 38, .65)); }
+  #banner { position: fixed; top: 38%; left: 0; right: 0; text-align: center; pointer-events: none; opacity: 0;
+    font-size: 34px; font-weight: 800; letter-spacing: .25em; color: var(--text); text-shadow: 0 2px 18px #000; }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<div id="hud">
+  <div id="title">DOOM<span>FLY</span></div>
+  <div id="subtitle">connectome arena</div>
+  <div class="row"><span class="k">Round</span><span class="v" id="round">–</span></div>
+  <div class="row"><span class="k">Health</span><span class="v" id="health">–</span></div>
+  <div id="healthbar"><div id="healthfill"></div></div>
+  <div class="row"><span class="k">Kills</span><span class="v" id="kills">–</span></div>
+  <div class="row"><span class="k">Ammo</span><span class="v" id="ammo">–</span></div>
+  <div id="status"><span id="dot"></span><span id="statusText">connecting</span></div>
+</div>
+<div id="hint">drag to orbit · scroll to zoom · F to follow the fly</div>
+<div id="flash"></div>
+<div id="banner"></div>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const params = new URLSearchParams(location.search);
+const WS_URL = params.get('ws') || 'ws://localhost:8767';
+const SCALE = 1 / 32;
+const ARENA = { min: -384, max: 384, ceiling: 192 };
+const TILE = 64;
+const HOVER = 41 * SCALE;
+const RENDER_DELAY_MS = 180;
+const SNAP_UNITS = 64;
+const TRAIL_POINTS = 120;
+const FLY_SCALE = 1.35;
+const CUTAWAY_OPACITY = 0.14;
+const $ = (id) => document.getElementById(id);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+document.body.prepend(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color('#07090c');
+scene.fog = new THREE.Fog('#07090c', 38, 80);
+
+const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 300);
+camera.position.set(-2, 25, 22);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.maxPolarAngle = Math.PI * 0.48;
+controls.minDistance = 4;
+controls.maxDistance = 70;
+
+scene.add(new THREE.HemisphereLight('#cfe0ff', '#0b0f14', 0.75));
+const sun = new THREE.DirectionalLight('#fff3e0', 1.9);
+sun.position.set(4, 34, 5);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -15, right: 15, top: 15, bottom: -15, near: 1, far: 70 });
+sun.shadow.bias = -0.0005;
+scene.add(sun);
+
+function toWorld(x, y, height = 0) {
+  return new THREE.Vector3(x * SCALE, height, -y * SCALE);
+}
+
+function canvasTexture(size, paint, repeatX, repeatY) {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  paint(canvas.getContext('2d'), size);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(repeatX, repeatY);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  return texture;
+}
+
+function noise(ctx, size, amount, alpha) {
+  for (let i = 0; i < amount; i++) {
+    const shade = Math.random() > 0.5 ? 255 : 0;
+    ctx.fillStyle = `rgba(${shade},${shade},${shade},${Math.random() * alpha})`;
+    ctx.fillRect(Math.random() * size, Math.random() * size, 2, 2);
+  }
+}
+
+function paintFloorTile(ctx, size) {
+  ctx.fillStyle = '#1a1f26';
+  ctx.fillRect(0, 0, size, size);
+  const grout = size * 0.04;
+  const gradient = ctx.createLinearGradient(0, 0, size, size);
+  gradient.addColorStop(0, '#39414c');
+  gradient.addColorStop(1, '#2c333c');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(grout, grout, size - grout * 2, size - grout * 2);
+  ctx.strokeStyle = 'rgba(255,255,255,0.07)';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(grout + 3, grout + 3, size - grout * 2 - 6, size - grout * 2 - 6);
+  noise(ctx, size, 1400, 0.08);
+}
+
+function paintWall(ctx, size) {
+  ctx.fillStyle = '#23282f';
+  ctx.fillRect(0, 0, size, size);
+  ctx.fillStyle = '#2c323a';
+  ctx.fillRect(size * 0.05, size * 0.08, size * 0.9, size * 0.6);
+  ctx.fillStyle = '#151a20';
+  ctx.fillRect(0, size * 0.74, size, size * 0.08);
+  ctx.fillStyle = '#5a2626';
+  ctx.fillRect(0, size * 0.9, size, size * 0.1);
+  ctx.fillStyle = '#56606b';
+  for (const [x, y] of [[0.1, 0.13], [0.9, 0.13], [0.1, 0.63], [0.9, 0.63]]) {
+    ctx.beginPath();
+    ctx.arc(size * x, size * y, size * 0.018, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  noise(ctx, size, 900, 0.1);
+}
+
+function buildArena() {
+  const span = (ARENA.max - ARENA.min) * SCALE;
+  const tiles = (ARENA.max - ARENA.min) / TILE;
+  const floor = new THREE.Mesh(
+    new THREE.PlaneGeometry(span, span),
+    new THREE.MeshStandardMaterial({ map: canvasTexture(256, paintFloorTile, tiles, tiles), roughness: 0.85, metalness: 0.05 }),
+  );
+  floor.rotation.x = -Math.PI / 2;
+  floor.receiveShadow = true;
+  scene.add(floor);
+
+  const outside = new THREE.Mesh(
+    new THREE.PlaneGeometry(200, 200),
+    new THREE.MeshStandardMaterial({ color: '#07090c', roughness: 1 }),
+  );
+  outside.rotation.x = -Math.PI / 2;
+  outside.position.y = -0.02;
+  scene.add(outside);
+
+  const height = ARENA.ceiling * SCALE;
+  const thickness = 0.35;
+  const wallMaterial = (length) => new THREE.MeshStandardMaterial({
+    map: canvasTexture(256, paintWall, length / (TILE * SCALE), 3), roughness: 0.75, metalness: 0.15, transparent: true,
+  });
+  const half = span / 2 + thickness / 2;
+  const walls = [
+    { x: 0, z: -half, w: span + thickness * 2, d: thickness, normal: [0, 0, -1] },
+    { x: 0, z: half, w: span + thickness * 2, d: thickness, normal: [0, 0, 1] },
+    { x: -half, z: 0, w: thickness, d: span, normal: [-1, 0, 0] },
+    { x: half, z: 0, w: thickness, d: span, normal: [1, 0, 0] },
+  ];
+  return walls.map((wall) => {
+    const material = wallMaterial(Math.max(wall.w, wall.d));
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(wall.w, height, wall.d), material);
+    mesh.position.set(wall.x, height / 2, wall.z);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    scene.add(mesh);
+    return { material, center: mesh.position.clone(), normal: new THREE.Vector3(...wall.normal) };
+  });
+}
+
+const toCamera = new THREE.Vector3();
+function cutawayWalls(walls) {
+  for (const wall of walls) {
+    const facesCamera = toCamera.subVectors(camera.position, wall.center).dot(wall.normal) > 0;
+    const target = facesCamera ? CUTAWAY_OPACITY : 1;
+    wall.material.opacity += (target - wall.material.opacity) * 0.18;
+    wall.material.depthWrite = wall.material.opacity > 0.98;
+  }
+}
+
+function segment(from, to, radius, material) {
+  const direction = new THREE.Vector3().subVectors(to, from);
+  const mesh = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius * 0.7, direction.length(), 6), material);
+  mesh.position.copy(from).addScaledVector(direction, 0.5);
+  mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.normalize());
+  mesh.castShadow = true;
+  return mesh;
+}
+
+function buildFly() {
+  const fly = new THREE.Group();
+  const body = new THREE.Group();
+  fly.add(body);
+  const chitin = new THREE.MeshStandardMaterial({ color: '#2d333b', roughness: 0.45, metalness: 0.25 });
+  const abdomenMaterial = new THREE.MeshStandardMaterial({ color: '#4a4f57', roughness: 0.55, metalness: 0.15 });
+  const stripe = new THREE.MeshStandardMaterial({ color: '#15181c', roughness: 0.6 });
+  const eye = new THREE.MeshStandardMaterial({ color: '#9b1c1c', roughness: 0.22, metalness: 0.1, emissive: '#3a0606' });
+  const leg = new THREE.MeshStandardMaterial({ color: '#1b1f24', roughness: 0.7 });
+  const wing = new THREE.MeshStandardMaterial({
+    color: '#dbeafe', transparent: true, opacity: 0.32, roughness: 0.15, metalness: 0.1,
+    side: THREE.DoubleSide, depthWrite: false,
+  });
+
+  const shape = (radius, scale, material, position) => {
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(radius, 24, 16), material);
+    mesh.scale.set(...scale);
+    mesh.position.set(...position);
+    mesh.castShadow = true;
+    body.add(mesh);
+    return mesh;
+  };
+
+  shape(0.3, [1.15, 0.95, 0.95], chitin, [0.05, 0, 0]);
+  shape(0.34, [1.55, 0.78, 0.9], abdomenMaterial, [-0.52, -0.04, 0]);
+  const abdomen = { x: -0.52, y: -0.04, a: 0.34 * 1.55, b: 0.34 * 0.78, c: 0.34 * 0.9 };
+  for (const x of [-0.34, -0.56, -0.78]) {
+    const k = Math.sqrt(Math.max(0, 1 - ((x - abdomen.x) / abdomen.a) ** 2));
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(1, 0.08, 8, 32), stripe);
+    ring.rotation.y = Math.PI / 2;
+    ring.position.set(x, abdomen.y, 0);
+    ring.scale.set(abdomen.c * k + 0.012, abdomen.b * k + 0.012, 0.35);
+    body.add(ring);
+  }
+  shape(0.2, [0.95, 0.9, 1.05], chitin, [0.42, 0.02, 0]);
+  for (const side of [-1, 1]) {
+    shape(0.13, [0.9, 1.15, 0.9], eye, [0.46, 0.06, side * 0.14]);
+    body.add(segment(new THREE.Vector3(0.58, 0.1, side * 0.05), new THREE.Vector3(0.7, 0.24, side * 0.1), 0.012, leg));
+  }
+
+  for (let pair = 0; pair < 3; pair++) {
+    for (const side of [-1, 1]) {
+      const root = new THREE.Vector3(0.22 - pair * 0.2, -0.16, side * 0.14);
+      const knee = new THREE.Vector3(0.3 - pair * 0.32, -0.02, side * 0.42);
+      const foot = new THREE.Vector3(0.36 - pair * 0.42, -0.42, side * 0.56);
+      body.add(segment(root, knee, 0.022, leg));
+      body.add(segment(knee, foot, 0.016, leg));
+    }
+  }
+
+  const wingShape = new THREE.Shape();
+  wingShape.moveTo(0, 0);
+  wingShape.bezierCurveTo(-0.15, 0.25, -0.75, 0.42, -1.02, 0.2);
+  wingShape.bezierCurveTo(-1.1, 0.05, -0.55, -0.08, 0, 0);
+  const wingGeometry = new THREE.ShapeGeometry(wingShape, 24);
+  const wings = [];
+  for (const side of [-1, 1]) {
+    const hinge = new THREE.Group();
+    hinge.position.set(0.02, 0.22, side * 0.08);
+    const blade = new THREE.Mesh(wingGeometry, wing);
+    blade.rotation.x = side * Math.PI / 2;
+    blade.rotation.z = 0.1;
+    hinge.add(blade);
+    body.add(hinge);
+    wings.push({ hinge, side });
+  }
+
+  const marker = new THREE.Group();
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(0.46, 0.56, 48),
+    new THREE.MeshBasicMaterial({ color: '#7dd3fc', transparent: true, opacity: 0.7, side: THREE.DoubleSide }),
+  );
+  ring.rotation.x = -Math.PI / 2;
+  const pointerShape = new THREE.Shape();
+  pointerShape.moveTo(0.95, 0);
+  pointerShape.lineTo(0.62, 0.16);
+  pointerShape.lineTo(0.62, -0.16);
+  pointerShape.closePath();
+  const pointer = new THREE.Mesh(
+    new THREE.ShapeGeometry(pointerShape),
+    new THREE.MeshBasicMaterial({ color: '#7dd3fc', transparent: true, opacity: 0.85, side: THREE.DoubleSide }),
+  );
+  pointer.rotation.x = -Math.PI / 2;
+  marker.add(ring, pointer);
+  marker.position.y = 0.02;
+
+  scene.add(fly, marker);
+  return { fly, body, wings, marker };
+}
+
+function buildTrail() {
+  const positions = new Float32Array(TRAIL_POINTS * 3);
+  const colors = new Float32Array(TRAIL_POINTS * 3);
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  geometry.setDrawRange(0, 0);
+  const line = new THREE.Line(geometry, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.9 }));
+  line.frustumCulled = false;
+  scene.add(line);
+  return { line, geometry, positions, colors, points: [] };
+}
+
+const arenaWalls = buildArena();
+const model = buildFly();
+model.fly.scale.setScalar(FLY_SCALE);
+model.marker.scale.setScalar(FLY_SCALE);
+const trail = buildTrail();
+const accent = new THREE.Color('#7dd3fc');
+const background = new THREE.Color('#07090c');
+
+function pushTrail(x, y) {
+  trail.points.push([x, y]);
+  if (trail.points.length > TRAIL_POINTS) trail.points.shift();
+  const count = trail.points.length;
+  trail.points.forEach(([px, py], i) => {
+    const world = toWorld(px, py, 0.03);
+    trail.positions.set([world.x, world.y, world.z], i * 3);
+    const color = background.clone().lerp(accent, (i + 1) / count);
+    trail.colors.set([color.r, color.g, color.b], i * 3);
+  });
+  trail.geometry.attributes.position.needsUpdate = true;
+  trail.geometry.attributes.color.needsUpdate = true;
+  trail.geometry.setDrawRange(0, count);
+}
+
+function clearTrail() {
+  trail.points = [];
+  trail.geometry.setDrawRange(0, 0);
+}
+
+const samples = [];
+const state = {
+  messages: 0,
+  rounds: 0,
+  socketOpen: false,
+  lastArrival: 0,
+  last: null,
+  pose: null,
+  follow: false,
+};
+window.flyview = state;
+
+function angleLerp(a, b, t) {
+  const delta = ((b - a + 540) % 360) - 180;
+  return a + delta * t;
+}
+
+function poseAt(time) {
+  if (!samples.length) return null;
+  while (samples.length > 2 && samples[1].arrival <= time) samples.shift();
+  const [a, b] = samples;
+  if (!b || time <= a.arrival) return { x: a.x, y: a.y, heading: a.heading };
+  if (time >= b.arrival) return { x: b.x, y: b.y, heading: b.heading };
+  if (b.snap) return { x: a.x, y: a.y, heading: a.heading };
+  const t = (time - a.arrival) / (b.arrival - a.arrival);
+  return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, heading: angleLerp(a.heading, b.heading, t) };
+}
+
+function flash(text) {
+  const overlay = $('flash');
+  const banner = $('banner');
+  banner.textContent = text;
+  for (const element of [overlay, banner]) {
+    element.style.transition = 'none';
+    element.style.opacity = '1';
+  }
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    overlay.style.transition = 'opacity 1.2s ease-out';
+    banner.style.transition = 'opacity 1.6s ease-in';
+    overlay.style.opacity = '0';
+    banner.style.opacity = '0';
+  }));
+}
+
+function setStatus(text, color) {
+  $('statusText').textContent = text;
+  $('dot').style.background = color;
+}
+
+function renderHud(message) {
+  const known = message.status === 'running';
+  const show = (value) => (known && value !== null && value !== undefined ? String(value) : '–');
+  $('round').textContent = show(message.round);
+  $('health').textContent = show(message.health);
+  $('kills').textContent = show(message.kills);
+  $('ammo').textContent = show(message.ammo);
+  const health = known && typeof message.health === 'number' ? Math.max(0, Math.min(100, message.health)) : 0;
+  $('healthfill').style.width = `${health}%`;
+  $('healthfill').style.background = health > 50 ? 'var(--good)' : health > 25 ? 'var(--warn)' : 'var(--bad)';
+}
+
+function accept(message) {
+  state.messages += 1;
+  state.lastArrival = performance.now();
+  const previous = state.last;
+  state.last = message;
+  renderHud(message);
+  if (message.status !== 'running') {
+    setStatus('simulator offline', 'var(--bad)');
+    return;
+  }
+  if (previous && previous.status === 'running' && message.round > previous.round) {
+    state.rounds += 1;
+    flash(`ROUND ${message.round}`);
+  }
+  if (!Array.isArray(message.pos) || typeof message.heading !== 'number') return;
+  const [x, y] = message.pos;
+  const newest = samples[samples.length - 1];
+  const restarted = previous && (message.run_id !== previous.run_id || message.sequence < previous.sequence);
+  const jumped = newest && Math.hypot(x - newest.x, y - newest.y) > SNAP_UNITS;
+  const roundChanged = previous && message.round !== previous.round;
+  const snap = Boolean(restarted || jumped || roundChanged);
+  samples.push({ arrival: state.lastArrival + RENDER_DELAY_MS, x, y, heading: message.heading, snap });
+  if (samples.length > 64) samples.splice(0, samples.length - 64);
+}
+
+function followTrail(pose) {
+  const last = trail.points[trail.points.length - 1];
+  if (last) {
+    const distance = Math.hypot(pose.x - last[0], pose.y - last[1]);
+    if (distance > SNAP_UNITS) clearTrail();
+    else if (distance < 6) return;
+  }
+  pushTrail(pose.x, pose.y);
+}
+
+let retryDelay = 500;
+function connect() {
+  setStatus(`connecting to ${WS_URL}`, 'var(--dim)');
+  let socket;
+  try {
+    socket = new WebSocket(WS_URL);
+  } catch (error) {
+    setStatus(`bad websocket url ${WS_URL}`, 'var(--bad)');
+    return;
+  }
+  socket.onopen = () => {
+    state.socketOpen = true;
+    retryDelay = 500;
+    setStatus('bridge connected, waiting', 'var(--warn)');
+  };
+  socket.onmessage = (event) => {
+    try {
+      accept(JSON.parse(event.data));
+    } catch (error) {
+      setStatus('bad message from bridge', 'var(--bad)');
+    }
+  };
+  socket.onclose = () => {
+    state.socketOpen = false;
+    setStatus(`bridge offline, retrying in ${(retryDelay / 1000).toFixed(1)} s`, 'var(--bad)');
+    setTimeout(connect, retryDelay);
+    retryDelay = Math.min(retryDelay * 2, 5000);
+  };
+}
+
+window.addEventListener('keydown', (event) => {
+  if (event.code === 'KeyF') state.follow = !state.follow;
+});
+
+function resize() {
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  camera.aspect = window.innerWidth / Math.max(window.innerHeight, 1);
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize);
+resize();
+
+const clock = new THREE.Clock();
+const followOffset = new THREE.Vector3();
+function frame() {
+  const elapsed = clock.getElapsedTime();
+  const now = performance.now();
+  const pose = poseAt(now);
+  if (pose) {
+    state.pose = pose;
+    const world = toWorld(pose.x, pose.y);
+    const yaw = THREE.MathUtils.degToRad(pose.heading);
+    model.fly.position.set(world.x, HOVER + Math.sin(elapsed * 3.1) * 0.06, world.z);
+    model.fly.rotation.y = yaw;
+    model.body.rotation.z = Math.sin(elapsed * 1.7) * 0.04;
+    model.marker.position.set(world.x, 0.02, world.z);
+    model.marker.rotation.y = yaw;
+    followTrail(pose);
+    if (state.follow) {
+      followOffset.set(-Math.cos(yaw) * 7, 5.5, Math.sin(yaw) * 7);
+      camera.position.lerp(world.clone().add(followOffset), 0.08);
+      controls.target.lerp(world.clone().setY(HOVER), 0.15);
+    }
+  }
+  const beat = Math.sin(elapsed * 58);
+  for (const { hinge, side } of model.wings) hinge.rotation.x = -side * (0.22 + 0.38 * beat);
+
+  if (state.socketOpen && state.last && state.last.status === 'running') {
+    const silent = now - state.lastArrival;
+    if (silent > 2000) setStatus(`no data for ${(silent / 1000).toFixed(0)} s`, 'var(--warn)');
+    else setStatus('live', 'var(--good)');
+  }
+
+  controls.update();
+  cutawayWalls(arenaWalls);
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+
+connect();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

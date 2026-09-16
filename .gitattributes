@@ -1,0 +1,4 @@
+*.sh text eol=lf
+tools/doomfly/bin/clang++ text eol=lf
+*.py text eol=lf
+*.jsonl text eol=lf

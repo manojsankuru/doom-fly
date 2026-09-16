@@ -1,0 +1,13 @@
+.env
+.venv/
+.venv-*/
+__pycache__/
+*.pyc
+_vizdoom.ini
+
+/doomfly/
+/claude.md
+
+tools/doomfly/logs/
+flyview/replays/
+node_modules/
