@@ -128,12 +128,6 @@ Two deviations from `plans/baseline.md`, both because this machine has no sudo i
 - `tools/doomfly/bin/clang++` is a shim that calls the installed `g++`. The build flags are compatible.
 
 `doomfly/connectome_data/` (1.1 GB), `.venv-neural/` and `outputs/` stay out of git.
-
-## The sessions
-
-- **Session 1** `flyview/docs/telemetry.md`: what port 8766 actually serves. It is polled HTTP, not a stream.
-- **Session 2** `flyview/bridge.py`: republishes a ~370-byte message on `ws://127.0.0.1:8767`. Standard library only.
-- **Session 3** `flyview/web/index.html`: the fly in its arena, with a HUD.
-- **Session 4** `flyview/web/blueprint.html`: 500 connectome neurons as a force-directed graph that glows with live activity.
+.
 
 Details in `flyview/README.md`.
